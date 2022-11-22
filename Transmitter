@@ -1,0 +1,156 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Wire.h>        
+#include "SSD1306Wire.h" 
+#define x_axis 33
+#define y_axis 34
+#define sw1_pin 17
+#define sw2_pin 16
+#define sw3_pin 19
+#define sw4_pin 18
+#define adc_pin 27
+#define vcc_pin 23
+const int R1 = 10000;
+const int R2 = 33000;
+
+SSD1306Wire display(0x3c, SDA, SCL);
+
+uint8_t mac_addr[] = {0x94, 0xE6, 0x86, 0x12, 0x29, 0xF8};
+uint8_t data[8];
+
+int x_axis_value;
+int y_axis_value;
+
+esp_now_peer_info_t peerInfo;
+
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+ 
+void setup() {
+  Serial.begin(115200);
+  display.init();
+  display.flipScreenVertically();
+  title();
+  battery_check();
+
+  pinMode(sw1_pin, INPUT_PULLUP);
+  pinMode(sw2_pin, INPUT_PULLUP);
+  pinMode(sw3_pin, INPUT_PULLUP);
+  pinMode(sw4_pin, INPUT_PULLUP);
+
+  WiFi.mode(WIFI_STA); 
+    if (esp_now_init() != ESP_OK) { 
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  esp_now_register_send_cb(OnDataSent);
+  memcpy(peerInfo.peer_addr, mac_addr, 6);
+  peerInfo.channel = 0;  
+  peerInfo.encrypt = false;   
+  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+    Serial.println("Failed to add peer");
+    return;
+  }
+}
+ 
+void loop() {
+  int x_axis_value = analogRead(x_axis);
+  int y_axis_value = analogRead(y_axis);
+
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(5,0, "x axis = " + String(x_axis_value)); 
+  display.drawString(5,20, "y axis = " + String(y_axis_value)); 
+  display.display(); 
+  Serial.print("x_axis: ");
+  Serial.print(x_axis_value);
+  Serial.print("  y_axis: ");
+  Serial.print(y_axis_value);
+  Serial.print("  switch:");
+  Serial.print(data[4]); 
+  Serial.print(data[5]);
+  Serial.print(data[6]);
+  Serial.println(data[7]);
+ 
+  data[0] = lowByte(x_axis_value);
+  data[1] = highByte(x_axis_value);
+  data[2] = lowByte(y_axis_value);
+  data[3] = highByte(y_axis_value);
+  data[4] = digitalRead(sw1_pin);
+  data[5] = digitalRead(sw2_pin);
+  data[6] = digitalRead(sw3_pin);
+  data[7] = digitalRead(sw4_pin);
+
+  switch_display();
+ 
+  esp_err_t result = esp_now_send(mac_addr, data, sizeof(data));
+
+  if (result == ESP_OK) {
+    Serial.println("Sent with success");
+  }
+  else {
+    Serial.println("Error sending the data");
+  }
+ 
+  delay(100);//連続送信をすると、コールバックの順番がおかしくなる場合があるのでしばらく待機
+}
+
+void title(){
+  display.setFont(ArialMT_Plain_24);
+  display.drawString(10,10,"Hello!"); 
+  display.setFont(ArialMT_Plain_16);
+  display.drawString(10,34,"OLDMAKERS"); 
+  display.display(); //表示する
+  delay(2000);
+  display.clear(); //バッファをクリア
+}
+ 
+void battery_check(){
+ pinMode(vcc_pin, OUTPUT);
+ digitalWrite(vcc_pin, HIGH);
+ float value = analogRead(adc_pin);
+ float voltage = value * (R1+R2) / R2 * (3.6/4095);
+ display.setFont(ArialMT_Plain_16);
+ display.drawString(10,20,"Battery "+String(voltage)+"V" ); 
+ if (voltage > 3.00){
+   display.setFont(ArialMT_Plain_24);
+   display.drawString(10,35,"OK!!"); 
+ }
+ else{
+   display.setFont(ArialMT_Plain_24);
+   display.drawString(10,35,"LOW!!"); 
+ }
+ display.display(); //表示する
+ display.clear(); //バッファをクリア
+ Serial.print("ADC:");
+ Serial.print(voltage);
+ Serial.print(" Value:");
+ Serial.println(value);
+delay(3000); 
+}
+
+void switch_display(){
+  if(  data[4]== 0){
+   display.setFont(ArialMT_Plain_16);
+   display.drawString(5,45, "SW1 ON" ); 
+   display.display(); 
+  }
+   if(  data[5]== 0){
+   display.setFont(ArialMT_Plain_16);
+   display.drawString(5,45, "SW2 ON" ); 
+   display.display(); 
+  }
+   if(  data[6]== 0){
+   display.setFont(ArialMT_Plain_16);
+   display.drawString(5,45, "SW3 ON" ); 
+   display.display(); 
+  }
+   if(  data[7]== 0){
+   display.setFont(ArialMT_Plain_16);
+   display.drawString(5,45, "SW4 ON" ); 
+   display.display(); 
+  }
+  display.clear();
+}
